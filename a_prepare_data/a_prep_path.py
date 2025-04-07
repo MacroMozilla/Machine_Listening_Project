@@ -16,16 +16,13 @@ P_evaltest = 'eval-test'
 
 def smart_cast(s: str):
     try:
-        # 先尝试转成 int
         i = int(s)
         return i
     except ValueError:
         try:
-            # 如果 int 失败，再尝试转 float
             f = float(s)
             return f
         except ValueError:
-            # 如果都失败，返回原始 str
             return s
 
 
@@ -94,21 +91,17 @@ class PrepInfo():
                         items.append(item)
 
                 self.machine2items[machine] = items
-
                 print()
-
                 pass
 
 
 part2machine2info = {}
-
-# dev train
 info_dev_train = {}
 
+
+# dev train
 # dev test
-
 # eval train
-
 # eval test
 
 
@@ -119,6 +112,5 @@ if __name__ == '__main__':
 
     info = {P_devtrain: pi_devtrain.machine2items,
             P_devtest: pi_devtest.machine2items}
-
 
     save_json(info, preset.dpath_info_json)
