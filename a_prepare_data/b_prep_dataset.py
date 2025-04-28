@@ -20,21 +20,40 @@ class WavDataset(Dataset):
 
         self.items = info[part][machine]
 
-        att_types = [str(type(v).__name__) for v in self.items[0]['att']]
+        self.att_types = [str(type(v).__name__) for v in self.items[0]['att']]
+        # self.weights = [1 for _ in self.att_types]
+        self.fctns = [lambda x:x for x in self.att_types]
+
         cols = list(zip(*[[v for v in item['att']] for item in self.items]))
 
         print(f"{[part]} {[machine]}")
-        for i, vtp in enumerate(att_types):
+        for i, vtp in enumerate(self.att_types):
             col = cols[i]
             if vtp == 'str':
 
                 mcats = sorted(list(set(col)))
                 print(f"att-{i} {vtp} {mcats}")
 
+                self.fctns[i] = lambda x: torch.nn.functional.one_hot(
+                    torch.tensor(
+                        mcats.index(x) if x in mcats else len(mcats)
+                    ),
+                    num_classes=len(mcats) + 1
+                ).float()
+
             elif vtp in {'int', 'float'}:
-                print(f"att-{i} {vtp} {[eval(vtp)(min(col)), eval(vtp)(max(col))]} {[round(float(np.mean(col)), 2), round(float(np.std(col)), 2)]}")
+                mean = float(np.mean(col))
+                std = float(np.std(col))
+                max_val = max(col)
+                min_val = min(col)
+                print(f"att-{i} {vtp} {[eval(vtp)(max_val), eval(vtp)(min_val)]} {[round(mean, 2), round(std, 2)]}")
+
+                self.fctns[i] = lambda x: torch.sigmoid(
+                    torch.tensor([(x - mean) / (std + 1e-8)])
+                )
+
         print()
-        self.att_num = len(att_types)
+        self.att_num = len(self.att_types)
 
     def get_label(self, idx):
         item = self.items[idx]
@@ -50,7 +69,28 @@ class WavDataset(Dataset):
     def get_att(self, idx):
         item = self.items[idx]
         att = item['att']
-        return att
+
+        # 先用函数和权重处理每个att[i]
+        processed_list = [
+            self.fctns[i](att[i])
+            for i in range(len(att))
+        ]
+
+        # 找出最大长度
+        max_len = max(p.shape[0] for p in processed_list)
+
+        # 将每个处理后的p扩展到max_len
+        padded_list = []
+        for p in processed_list:
+            if p.shape[0] < max_len:
+                repeat_times = (max_len + p.shape[0] - 1) // p.shape[0]  # 向上取整
+                p = p.repeat(repeat_times, *[1] * (p.dim() - 1))[:max_len]
+            padded_list.append(p)
+
+        # Stack成 (F, D) 形状
+        processed = torch.stack(padded_list, dim=0).to(torch.float32)
+
+        return processed
 
     def __len__(self):
         return len(self.items)
@@ -76,15 +116,18 @@ if __name__ == '__main__':
 
     machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve']
 
-    dataset = WavDataset(part=P_devtrain, machine='bearing')
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=0)
+    machine2AxD = {}
 
-    for batch in dataloader:
-        x_BxT, y_B, atts_NxB = batch
-        print(x_BxT.shape, x_BxT.dtype)
-        print(y_B.shape, y_B.dtype)
-        for aidx, att in enumerate(atts_NxB):
-            print(f"aidx: {list(att)}")
+    for machine in machines:
+        dataset = WavDataset(part=P_devtrain, machine=machine)
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=0)
 
-        print()
-        print()
+        for batch in dataloader:
+            x_BxT, y_B, atts_BxAxD = batch
+            A = atts_BxAxD.shape[1]
+            D = atts_BxAxD.shape[2]
+            print(atts_BxAxD)
+            machine2AxD[machine] = (A, D)
+            break
+
+    print(machine2AxD)
