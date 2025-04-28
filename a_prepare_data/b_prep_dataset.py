@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import torch
 import torchaudio
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -35,21 +36,35 @@ class WavDataset(Dataset):
         print()
         self.att_num = len(att_types)
 
+    def get_label(self, idx):
+        item = self.items[idx]
+        label = int(0.5 * (item['label'] + 1))
+        return label
+
+    def get_waveform(self, idx):
+        item = self.items[idx]
+        fpath = item['fpath']
+        waveform, sample_rate = torchaudio.load(fpath)
+        return waveform
+
+    def get_att(self, idx):
+        item = self.items[idx]
+        att = item['att']
+        return att
+
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, idx):
 
-        item = self.items[idx]
-        fpath = item['fpath']
-        att = item['att']
-        waveform, sample_rate = torchaudio.load(fpath)
-
-        label = int(0.5 * (item['label'] + 1))
-
-        waveform = waveform.squeeze(0)
+        att = self.get_att(idx)
+        label = self.get_label(idx)
+        waveform = self.get_waveform(idx)
 
         return waveform, label, att
+
+
+
 
 
 if __name__ == '__main__':
