@@ -15,8 +15,7 @@ dpath_dev_train_test = os.path.join(dpath_data, '7882613')
 dpath_eval_train = os.path.join(dpath_data, '7830345')
 dpath_eval_test = os.path.join(dpath_data, '7860847')
 
-dpath_custom_models = os.path.join(dpath_root, 'custom_models')
-
+dpath_custom_models = os.path.join(dpath_data, 'custom_models')
 
 dpath_info_json = os.path.join(dpath_data, 'info.json')
 

@@ -70,16 +70,13 @@ class WavDataset(Dataset):
         item = self.items[idx]
         att = item['att']
 
-        # 先用函数和权重处理每个att[i]
         processed_list = [
             self.fctns[i](att[i])
             for i in range(len(att))
         ]
 
-        # 找出最大长度
         max_len = max(p.shape[0] for p in processed_list)
 
-        # 将每个处理后的p扩展到max_len
         padded_list = []
         for p in processed_list:
             if p.shape[0] < max_len:
@@ -87,7 +84,6 @@ class WavDataset(Dataset):
                 p = p.repeat(repeat_times, *[1] * (p.dim() - 1))[:max_len]
             padded_list.append(p)
 
-        # Stack成 (F, D) 形状
         processed = torch.stack(padded_list, dim=0).to(torch.float32)
 
         return processed

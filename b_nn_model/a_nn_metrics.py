@@ -6,52 +6,8 @@ def compute_auc(y_true, y_score):
     return roc_auc_score(y_true, y_score)
 
 
-import numpy as np
-
-
-def compute_pauc(y_true, y_score, p=0.1):
-    """
-    Compute partial AUC (pAUC) by focusing on the top p fraction of hardest negatives.
-
-    Args:
-        y_true (np.ndarray): Binary ground-truth labels (0 or 1).
-        y_score (np.ndarray): Predicted scores (continuous).
-        p (float): Fraction of negative samples to focus on (e.g., 0.1 for top 10%).
-
-    Returns:
-        float: Partial AUC value.
-    """
-
-    # Separate positive and negative samples
-    scores_pos = y_score[y_true == 1]
-    scores_neg = y_score[y_true == 0]
-
-    n_pos = len(scores_pos)
-    n_neg = len(scores_neg)
-
-    # Handle edge cases
-    if n_pos == 0 or n_neg == 0:
-        return np.nan
-
-    # Sort negative scores ascending
-    scores_neg_sorted = np.sort(scores_neg)
-
-    # Select top p fraction hardest negatives (lowest scores)
-    n_selected_neg = max(int(np.floor(p * n_neg)), 1)
-    selected_neg = scores_neg_sorted[:n_selected_neg]
-
-    # Count how many positives rank above the selected negatives
-    count = 0
-    for s_pos in scores_pos:
-        for s_neg in selected_neg:
-            if s_pos > s_neg:
-                count += 1
-            elif s_pos == s_neg:
-                count += 0.5
-
-    # Normalize
-    pauc = count / (n_pos * n_selected_neg)
-    return pauc
+def compute_pauc(y_true, y_score, max_fpr=0.1):
+    return roc_auc_score(y_true, y_score, max_fpr=max_fpr)
 
 
 # --- Metrics computation function ---

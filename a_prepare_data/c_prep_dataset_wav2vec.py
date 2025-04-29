@@ -61,5 +61,6 @@ if __name__ == '__main__':
 
             for batch in tqdm(dataloader):
                 x_TxF, y_B, att = batch
-                # Just iterate, Wav2VecDataset __getitem__ already handles caching
+                print(x_TxF.shape)
+
                 pass

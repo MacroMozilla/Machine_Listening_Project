@@ -15,26 +15,53 @@ from b_nn_model.a_nn_metrics import compute_auc
 from b_nn_model.b_nn_model_wav2vec_wrap import EmbeddingModel  # 🛠 注意：换成了EmbeddingModel！
 
 
-class CosineSimilarityLoss(nn.Module):
+class CosineSimilarity01(nn.Module):
     def __init__(self, reduction='mean'):
-        super(CosineSimilarityLoss, self).__init__()
+        super(CosineSimilarity01, self).__init__()
         self.reduction = reduction
 
     def forward(self, x, y):
         cos_sim = torch.nn.functional.cosine_similarity(x, y, dim=1)
-        loss = 1.0 - cos_sim  # 1 - cosine similarity
-        if self.reduction == 'mean':
-            return loss.mean()
-        elif self.reduction == 'sum':
-            return loss.sum()
-        else:
-            return loss
+        cos_sim_01 = (cos_sim + 1) * 0.5
+        return cos_sim_01
+
+
+def cosine_similarity_matrix(x, y):
+    """
+    x: (B_x, D)
+    y: (B_y, D)
+    output: (B_x, B_y)
+    """
+    x_norm = torch.nn.functional.normalize(x, p=2, dim=1)
+    y_norm = torch.nn.functional.normalize(y, p=2, dim=1)
+    sim_matrix = torch.matmul(x_norm, y_norm.T)  # (B_x, B_y)
+
+    sim_matrix_01 = (sim_matrix + 1) * 0.5  # scale to [0,1]
+    return sim_matrix_01
+
+
+def matrix_bce_loss_balanced_v2(sim_matrix, eps=1e-8):
+    B = sim_matrix.size(0)
+    N = B * B
+
+    labels = torch.eye(B, device=sim_matrix.device)  # (B, B)
+    sim_matrix = torch.clamp(sim_matrix, min=eps, max=1.0 - eps)
+
+    # 正负样本权重
+    w_pos = 1.0
+    w_neg = 1.0 / (B - 1)
+
+    pos_loss = -labels * torch.log(sim_matrix) * w_pos
+    neg_loss = -(1 - labels) * torch.log(1 - sim_matrix) * w_neg
+
+    loss = pos_loss + neg_loss
+    return loss.mean()
 
 
 # --- Global settings ---
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-batch_size = 16
+batch_size = 10
 epochs = 50
 learning_rate = 1e-3
 latent_dim = 128
@@ -42,108 +69,126 @@ patience = 5
 save_dir = preset.dpath_custom_models
 os.makedirs(save_dir, exist_ok=True)
 
-machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve']
-
+machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve'][:]
 all_eval_results = []
 
-# --- Main training and evaluation loop ---
+# --- Main loop ---
 for machine in machines:
     print(f"\n===== Training Machine: {machine} =====")
 
-    # === Prepare dataset ===
+    # Prepare datasets
     train_dataset = Wav2VecDataset(part=P_devtrain, machine=machine)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
     test_dataset = Wav2VecDataset(part=P_devtest, machine=machine)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
-
-    # === Initialize Model ===
+    # Initialize model, optimizer, etc.
     model_embed = EmbeddingModel(machine=machine).to(device)
     optimizer = torch.optim.Adam(model_embed.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=5, factor=0.5)
-    criterion = torch.nn.CosineEmbeddingLoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=patience, factor=0.5)
+    cosim01 = CosineSimilarity01()
 
     best_auc = 0
     patience_counter = 0
 
     for epoch in range(epochs):
         model_embed.train()
-        total_loss = 0
 
-        # --- Training step ---
-        for x_TxF_batch, _, att_AxD_batch in tqdm(train_loader, desc=f"Train-{machine} Epoch {epoch+1}"):
-            x_TxF_batch = x_TxF_batch.to(device)
-            att_AxD_batch = att_AxD_batch.to(device)
+        train_cosim_s = []
+        N = len(train_loader.dataset)
+        for x_BxTxF, _, att_BxAxD in tqdm(train_loader, desc=f"Train-{machine} Epoch {epoch + 1}"):
+            x_BxTxF, att_BxAxD = x_BxTxF.to(device), att_BxAxD.to(device)
+
+            B, T, F = x_BxTxF.shape
 
             optimizer.zero_grad()
-            x_embed, att_embed = model_embed(x_TxF_batch, att_AxD_batch)
+            x_embed, att_embed = model_embed(x_BxTxF, att_BxAxD)
 
-            target = torch.ones(x_embed.size(0), device=device)  # 正样本cosine=1
-            loss = criterion(x_embed, att_embed, target)
+            cosim_B = cosim01(x_embed, att_embed)
+
+            loss = matrix_bce_loss_balanced_v2(cosine_similarity_matrix(x_embed, att_embed))
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
 
-        # --- Evaluation step after training ---
+            train_cosim_s.extend(cosim_B.detach().cpu().numpy().tolist())
+
+        train_cosim_mean = np.mean(train_cosim_s)
+        train_cosim_std = np.std(train_cosim_s)
+
+        # --- Validation ---
         model_embed.eval()
         scores = []
-        labels_test = []
+        labels = []
 
         with torch.no_grad():
-            for x_TxF_val, y_val, att_val in tqdm(test_loader):
-                x_TxF_val = x_TxF_val.to(device)
-                att_val = att_val.to(device)
+            for x_BxTxF_val, y_B_val, att_BxAxD_val in tqdm(test_loader, desc=f"Eval-{machine} Epoch {epoch + 1}"):
+                x_BxTxF_val, att_BxAxD_val = x_BxTxF_val.to(device), att_BxAxD_val.to(device)
 
-                x_embed, att_embed = model_embed(x_TxF_val, att_val)
+                x_embed, att_embed = model_embed(x_BxTxF_val, att_BxAxD_val)
 
-                # Anomaly score = 1 - cosine similarity
-                cosine_sim = torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1)
-                anomaly_score = 1.0 - cosine_sim  # Higher means more anomalous
+                cosine_sim = (torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1) + 1) * 0.5
 
-                scores.append(anomaly_score.cpu())
-                labels_test.append(y_val)
+                score = torch.sigmoid((cosine_sim - train_cosim_mean) / train_cosim_std)
 
-        scores = torch.cat(scores).numpy()
-        labels_test = torch.cat(labels_test).numpy()
-        print(labels_test)
-        print(scores)
+                scores.append(score)
+                labels.append(y_B_val)
 
-        true_labels = (labels_test != 0).astype(int)
+        scores = torch.cat(scores).detach().cpu().numpy()
+        labels = torch.cat(labels).detach().cpu().numpy()
 
-        val_auc = compute_auc(true_labels, scores)
-        # --- Scheduler Step ---
+        # print(scores)
+        # print(labels)
+
+        val_auc = compute_auc(labels, scores)
         scheduler.step(val_auc)
 
-        print(f"→ Epoch {epoch+1} | Train Loss={total_loss:.4f} | Val AUC={val_auc:.4f}")
+        print(f"→ Epoch {epoch + 1} | Train cosim mean ={train_cosim_mean:.6f} | Val AUC={val_auc:.6f}")
 
-        # --- Save model if improved ---
+        # --- Save the best model ---
         if not np.isnan(val_auc) and val_auc > best_auc:
             best_auc = val_auc
             patience_counter = 0
+
             model_save_path = os.path.join(save_dir, f"EmbeddingModel.{machine}.pth")
             torch.save(model_embed.state_dict(), model_save_path)
-            print(f"✅ Embedding Model saved to {model_save_path}")
+            print(f"✅ Saved model: {model_save_path}")
 
-            # Immediate evaluation CSV save for best model
-            eval_results = compute_metrics(scores, true_labels)
-            eval_results['Machine'] = machine
-            df = pd.DataFrame([eval_results])
+            # Save evaluation results
+            eval_metrics = {}
+            eval_metrics['Machine'] = machine
+            eval_metrics.update(compute_metrics(scores, labels))
+
+            df_eval = pd.DataFrame([eval_metrics])
             eval_csv_path = os.path.join(save_dir, f"eval.{machine}.csv")
-            df.to_csv(eval_csv_path, index=False)
-            print(f"✅ Eval metrics saved to {eval_csv_path}")
+            df_eval.to_csv(eval_csv_path, index=False)
+            print(f"✅ Saved eval metrics: {eval_csv_path}")
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print(f"🔴 Early stopping triggered at epoch {epoch+1}.")
+                print(f"🔴 Early stopping at epoch {epoch + 1}")
                 break
 
-    # Load best eval results after training for merging
-    eval_csv_path = os.path.join(save_dir, f"eval.{machine}.csv")
-    df = pd.read_csv(eval_csv_path)
-    all_eval_results.append(df)
 
-# --- Final merge ---
-final_df = pd.concat(all_eval_results, ignore_index=True)
+import glob
+# --- Final merging ---
+eval_csv_paths = glob.glob(os.path.join(save_dir, "eval.*.csv"))
+
+dfs = []
+for path in eval_csv_paths:
+    if 'eval.all.csv' in path:
+        continue
+    df = pd.read_csv(path)
+    dfs.append(df)
+
+final_df = pd.concat(dfs, ignore_index=True)
+
+# 保存合并后的文件
 final_eval_path = os.path.join(save_dir, "eval.all.csv")
 final_df.to_csv(final_eval_path, index=False)
-print(f"\n✅ Final merged evaluation saved to {final_eval_path}")
+print(f"\n✅ Final merged evaluation saved: {final_eval_path}")
+
+# --- Calculate mean ---
+mean_row = final_df.mean(numeric_only=True)
+print("\n📈 Overall mean metrics:")
+print(mean_row)
