@@ -53,9 +53,9 @@ class FeatureExtractor(nn.Module):
         return output
 
 class EmbeddingModel(nn.Module):
-    def __init__(self, machine, dropout_rate=0.3, embed_dim=128, out_dim=128):
+    def __init__(self, machine, dropout_rate=0.3,F_in=768, embed_dim=128, out_dim=128):
         super().__init__()
-        self.feature_extractor = FeatureExtractor()  # 输出embed_dim
+        self.feature_extractor = FeatureExtractor(F_in=F_in)  # 输出embed_dim
         self.embed_att = EmbedAtt(machine)           # 输出embed_dim
         self.dropout = nn.Dropout(p=dropout_rate)
         self.linear = nn.Linear(embed_dim, out_dim)  # 新加的线性层
