@@ -129,7 +129,7 @@ for machine in machines:
 
                 cosine_sim = (torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1) + 1) * 0.5
 
-                score = torch.sigmoid((cosine_sim - train_cosim_mean) / train_cosim_std)
+                score = torch.sigmoid(cosine_sim)
 
                 scores.append(score)
                 labels.append(y_B_val)
@@ -169,8 +169,10 @@ for machine in machines:
                 print(f"🔴 Early stopping at epoch {epoch + 1}")
                 break
 
-
+import os
 import glob
+import pandas as pd
+
 # --- Final merging ---
 eval_csv_paths = glob.glob(os.path.join(save_dir, "eval.*.csv"))
 
@@ -183,12 +185,18 @@ for path in eval_csv_paths:
 
 final_df = pd.concat(dfs, ignore_index=True)
 
-# 保存合并后的文件
-final_eval_path = os.path.join(save_dir, "eval.all.csv")
-final_df.to_csv(final_eval_path, index=False)
-print(f"\n✅ Final merged evaluation saved: {final_eval_path}")
+# --- Calculate mean row ---
+mean_row = final_df.mean(numeric_only=True).round(4)
+mean_df = pd.DataFrame([mean_row])
 
-# --- Calculate mean ---
-mean_row = final_df.mean(numeric_only=True)
+first_col_name = final_df.columns[0]
+mean_df.insert(0, first_col_name, "mean")
+
+final_df_with_mean = pd.concat([final_df, mean_df], ignore_index=True)
+
+final_eval_path = os.path.join(save_dir, "eval.all.csv")
+final_df_with_mean.to_csv(final_eval_path, index=False)
+
+print(f"\n✅ Final merged evaluation (with mean row) saved: {final_eval_path}")
 print("\n📈 Overall mean metrics:")
 print(mean_row)

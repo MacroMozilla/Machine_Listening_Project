@@ -36,11 +36,11 @@ def compute_metrics(pred_scores, true_labels):
     accuracy = accuracy_score(true_labels, preds)
 
     results = {
-        'AUC': auc,
-        'pAUC': pauc,
-        'F1': f1,
-        'Accuracy': accuracy,
-        'Precision': precision,
-        'Recall': recall
+        'AUC': round(auc,4),
+        'pAUC': round(pauc,4),
+        'F1': round(f1,4),
+        'Accuracy': round(accuracy,4),
+        'Precision': round(precision,4),
+        'Recall': round(recall,4)
     }
     return results
