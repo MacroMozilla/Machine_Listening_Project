@@ -75,7 +75,6 @@ class FeatureExtractor(nn.Module):
         )
 
         self.adapool = nn.AdaptiveMaxPool1d(1)  # (B, 128, 1)
-        self.dropout = nn.Dropout(0.3)
         self.fc = nn.Linear(128 * 2, F_out)  # max + mean → 256 → 128
 
     def forward(self, x_TxF):  # Input: (B, T, F)
@@ -89,7 +88,6 @@ class FeatureExtractor(nn.Module):
         mean_pooled = x.mean(dim=-1)  # (B, 128)
 
         combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 256)
-        combined = self.dropout(combined)
 
         return self.fc(combined)  # (B, F_out)
 
