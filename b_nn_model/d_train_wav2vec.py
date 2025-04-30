@@ -10,52 +10,10 @@ from tqdm import tqdm
 from a_nn_metrics import compute_metrics
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
-from a_prepare_data.c_prep_dataset_MelSpec import MelSpecDataset
+from a_prepare_data.c_prep_dataset_wav2vec import Wav2VecDataset
 from b_nn_model.a_nn_metrics import compute_auc
-from b_nn_model.b_nn_model_wav2vec_wrap import EmbeddingModel  # 🛠 注意：换成了EmbeddingModel！
-
-
-class CosineSimilarity01(nn.Module):
-    def __init__(self, reduction='mean'):
-        super(CosineSimilarity01, self).__init__()
-        self.reduction = reduction
-
-    def forward(self, x, y):
-        cos_sim = torch.nn.functional.cosine_similarity(x, y, dim=1)
-        cos_sim_01 = (cos_sim + 1) * 0.5
-        return cos_sim_01
-
-
-def cosine_similarity_matrix(x, y):
-    """
-    x: (B_x, D)
-    y: (B_y, D)
-    output: (B_x, B_y)
-    """
-    x_norm = torch.nn.functional.normalize(x, p=2, dim=1)
-    y_norm = torch.nn.functional.normalize(y, p=2, dim=1)
-    sim_matrix = torch.matmul(x_norm, y_norm.T)  # (B_x, B_y)
-
-    sim_matrix_01 = (sim_matrix + 1) * 0.5  # scale to [0,1]
-    return sim_matrix_01
-
-
-def matrix_bce_loss_balanced_v2(sim_matrix, eps=1e-8):
-    B = sim_matrix.size(0)
-    N = B * B
-
-    labels = torch.eye(B, device=sim_matrix.device)  # (B, B)
-    sim_matrix = torch.clamp(sim_matrix, min=eps, max=1.0 - eps)
-
-    # 正负样本权重
-    w_pos = 1.0
-    w_neg = 1.0 / (B - 1)
-
-    pos_loss = -labels * torch.log(sim_matrix) * w_pos
-    neg_loss = -(1 - labels) * torch.log(1 - sim_matrix) * w_neg
-
-    loss = pos_loss + neg_loss
-    return loss.mean()
+from b_nn_model.b_nn_loss import CosineSimilarity01, matrix_bce_loss_balanced_v2, cosine_similarity_matrix
+from b_nn_model.c_nn_model import EmbeddingModel  # 🛠 注意：换成了EmbeddingModel！
 
 
 # --- Global settings ---
@@ -64,9 +22,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 20
 epochs = 50
 learning_rate = 1e-3
-latent_dim = 128
+latent_dim = 64
 patience = 5
-save_dir = os.path.join(preset.dpath_custom_models,MelSpecDataset.__name__)
+save_dir = os.path.join(preset.dpath_custom_models, Wav2VecDataset.__name__)
 os.makedirs(save_dir, exist_ok=True)
 
 machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve'][:]
@@ -77,14 +35,14 @@ for machine in machines:
     print(f"\n===== Training Machine: {machine} =====")
 
     # Prepare datasets
-    train_dataset = MelSpecDataset(part=P_devtrain, machine=machine)
+    train_dataset = Wav2VecDataset(part=P_devtrain, machine=machine)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
-    test_dataset = MelSpecDataset(part=P_devtest, machine=machine)
+    test_dataset = Wav2VecDataset(part=P_devtest, machine=machine)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     # Initialize model, optimizer, etc.
-    model_embed = EmbeddingModel(machine=machine,F_in=128).to(device)
+    model_embed = EmbeddingModel(machine=machine).to(device)
     optimizer = torch.optim.Adam(model_embed.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=patience, factor=0.5)
     cosim01 = CosineSimilarity01()
@@ -127,9 +85,9 @@ for machine in machines:
 
                 x_embed, att_embed = model_embed(x_BxTxF_val, att_BxAxD_val)
 
-                cosine_sim = (torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1) + 1) * 0.5
+                cosine_sim = torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1)
 
-                score = torch.sigmoid(cosine_sim)
+                score = cosine_sim.clamp(min=0.0)
 
                 scores.append(score)
                 labels.append(y_B_val)
