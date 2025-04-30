@@ -10,12 +10,10 @@ from tqdm import tqdm
 from a_nn_metrics import compute_metrics
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
-from a_prepare_data.c_prep_dataset_MelSpec import MelSpecDataset
+from a_prepare_data.b_prep_dataset import WavDataset
 from b_nn_model.a_nn_metrics import compute_auc
 from b_nn_model.b_nn_loss import CosineSimilarity01, matrix_bce_loss_balanced_v2, cosine_similarity_matrix
-from b_nn_model.c_nn_model import EmbeddingModel  # 🛠 注意：换成了EmbeddingModel！
-
-
+from b_nn_model.c_nn_model import EmbeddingModel, RawFeatureExtractor  # 🛠 注意：换成了EmbeddingModel！
 
 
 # --- Global settings ---
@@ -24,9 +22,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 20
 epochs = 50
 learning_rate = 1e-3
-latent_dim = 128
-patience = 10
-save_dir = os.path.join(preset.dpath_custom_models, MelSpecDataset.__name__)
+latent_dim = 64
+patience = 5
+save_dir = os.path.join(preset.dpath_custom_models, WavDataset.__name__)
 os.makedirs(save_dir, exist_ok=True)
 
 machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve'][:]
@@ -37,14 +35,14 @@ for machine in machines:
     print(f"\n===== Training Machine: {machine} =====")
 
     # Prepare datasets
-    train_dataset = MelSpecDataset(part=P_devtrain, machine=machine)
+    train_dataset = WavDataset(part=P_devtrain, machine=machine)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
-    test_dataset = MelSpecDataset(part=P_devtest, machine=machine)
+    test_dataset = WavDataset(part=P_devtest, machine=machine)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     # Initialize model, optimizer, etc.
-    model_embed = EmbeddingModel(machine=machine, F_in=128).to(device)
+    model_embed = EmbeddingModel(machine=machine,F_in=16000,feature_extractor=RawFeatureExtractor).to(device)
     optimizer = torch.optim.Adam(model_embed.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=patience, factor=0.5)
     cosim01 = CosineSimilarity01()
