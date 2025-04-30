@@ -1,44 +1,58 @@
 # --- Imports ---
+import os
+
 import torch
 import torch.nn as nn
 
-machine2AxD = {
-    'bearing': (2, 9), 'fan': (1, 5), 'gearbox': (2, 1),
-    'slider': (2, 1), 'ToyCar': (3, 6), 'ToyTrain': (3, 11), 'valve': (1, 1)
-}
+import preset
+from f_utility.io_tools import read_json
+
+machine2attinfos = read_json(preset.dpath_machine2attinfos) if os.path.exists(preset.dpath_machine2attinfos) else {}
 
 
 # --- Model Definitions ---
 class EmbedAtt(nn.Module):
-    def __init__(self, machine, out_dim=128, hidden_dim=64):
+    def __init__(self, machine, out_dim=128, hidden_dim=64, eps=1e-5):
         super().__init__()
-        self.A, self.D = machine2AxD[machine]
+        self.eps = eps
+        self.attinfos = machine2attinfos[machine]  # List of dicts
+        self.embedders = nn.ModuleList()
 
-        # Shared MLP encoder for each attribute vector
-        self.encoder = nn.Sequential(
-            nn.Linear(self.D, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
+        for attinfo in self.attinfos:
+            if attinfo['type'] in ['int', 'float']:
+                # Numeric: sigmoid((x - mean) / (std + eps)) -> Linear(hidden_dim)
+                embed = nn.Linear(1, hidden_dim)
+            elif attinfo['type'] == 'str':
+                enum_size = len(attinfo['enum']) + 1  # Add 1 for unknown/missing
+                embed = nn.Embedding(enum_size, hidden_dim)
+            else:
+                raise ValueError(f"Unknown attribute type: {attinfo['type']}")
+            self.embedders.append(embed)
 
-        # Final projection layer
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_dim * 2, out_dim),
-            nn.ReLU()
-        )
+        self.project_out = nn.Linear(hidden_dim * len(self.attinfos), out_dim)
 
-    def forward(self, att_AxD):  # shape: (B, A, D)
-        B, A, D = att_AxD.shape
+    def forward(self, x):  # x: [B, A]
+        B, A = x.shape
+        outputs = []
 
-        x = self.encoder(att_AxD)  # → (B, A, H)
+        for i, attinfo in enumerate(self.attinfos):
+            xi = x[:, i]  # shape [B]
+            if attinfo['type'] in ['int', 'float']:
+                # Normalize and sigmoid
+                mean = attinfo['mean']
+                std = attinfo['std']
+                xi = (xi - mean) / (std + self.eps)
+                xi = torch.sigmoid(xi.unsqueeze(-1))  # shape [B, 1]
+                hi = self.embedders[i](xi)  # shape [B, H]
+            elif attinfo['type'] == 'str':
+                # Assume xi already mapped to index [0, L]
+                xi = xi.long()
+                hi = self.embedders[i](xi)  # shape [B, H]
+            outputs.append(hi)
 
-        max_pooled = x.max(dim=1).values  # (B, H)
-        mean_pooled = x.mean(dim=1)  # (B, H)
+        h = torch.cat(outputs, dim=-1)  # shape [B, A*H]
+        return self.project_out(h)  # shape [B, out_dim]
 
-        combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 2H)
-
-        return self.fc(combined)  # (B, 128)
 
 
 class FeatureExtractor(nn.Module):

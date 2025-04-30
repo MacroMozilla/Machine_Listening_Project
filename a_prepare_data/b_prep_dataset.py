@@ -8,9 +8,11 @@ from torch.utils.data import Dataset, DataLoader
 
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
-from f_utility.io_tools import read_json
+from f_utility.io_tools import read_json, save_json
 
 info = read_json(preset.dpath_info_json)
+
+machine2attinfos = read_json(preset.dpath_machine2attinfos) if os.path.exists(preset.dpath_machine2attinfos) else {}
 
 
 class WavDataset(Dataset):
@@ -19,41 +21,57 @@ class WavDataset(Dataset):
         self.machine = machine
 
         self.items = info[part][machine]
-
-        self.att_types = [str(type(v).__name__) for v in self.items[0]['att']]
-        # self.weights = [1 for _ in self.att_types]
-        self.fctns = [lambda x:x for x in self.att_types]
-
         cols = list(zip(*[[v for v in item['att']] for item in self.items]))
 
+        self.attinfos = []
+        if os.path.exists(preset.dpath_machine2attinfos):
+            self.attinfos = machine2attinfos[machine]
+
+        else:
+            for v in self.items[0]['att']:
+                attinfo = {}
+                attinfo['type'] = str(type(v).__name__)
+                attinfo['mean'] = None
+                attinfo['std'] = None
+                attinfo['enum'] = None
+                self.attinfos.append(attinfo)
+
+            print(self.attinfos)
+            for i, attinfo in enumerate(self.attinfos):
+                vtype = attinfo['type']
+                col = cols[i]
+                if vtype == 'str':
+                    attinfo['enum'] = sorted(list(set(col)))
+
+                elif vtype in {'int', 'float'}:
+                    vals = [eval(vtype)(val) for val in col]
+                    attinfo['mean'] = float(np.mean(vals))
+                    attinfo['std'] = float(np.std(vals))
+
+        self.fctns = [lambda x: x for x in self.attinfos]
+
         print(f"{[part]} {[machine]}")
-        for i, vtp in enumerate(self.att_types):
+        for i, attinfo in enumerate(self.attinfos):
+            vtype = attinfo['type']
             col = cols[i]
-            if vtp == 'str':
+            if vtype == 'str':
 
-                mcats = sorted(list(set(col)))
-                print(f"att-{i} {vtp} {mcats}")
-
-                self.fctns[i] = lambda x: torch.nn.functional.one_hot(
-                    torch.tensor(
-                        mcats.index(x) if x in mcats else len(mcats)
-                    ),
-                    num_classes=len(mcats) + 1
+                mcats = self.attinfos[i]['enum']
+                print(f"att-{i} {vtype} {mcats}")
+                self.fctns[i] = lambda x: torch.tensor(
+                    mcats.index(x) if x in mcats else len(mcats)
                 ).float()
 
-            elif vtp in {'int', 'float'}:
-                mean = float(np.mean(col))
-                std = float(np.std(col))
+            elif vtype in {'int', 'float'}:
+                mean_val = self.attinfos[i]['mean']
+                std_val = self.attinfos[i]['std']
                 max_val = max(col)
                 min_val = min(col)
-                print(f"att-{i} {vtp} {[eval(vtp)(max_val), eval(vtp)(min_val)]} {[round(mean, 2), round(std, 2)]}")
+                print(f"att-{i} {vtype} {[eval(vtype)(max_val), eval(vtype)(min_val)]} {[round(mean_val, 2), round(std_val, 2)]}")
 
-                self.fctns[i] = lambda x: torch.sigmoid(
-                    torch.tensor([(x - mean) / (std + 1e-8)])
-                )
+                self.fctns[i] = lambda x: torch.tensor(x)
 
         print()
-        self.att_num = len(self.att_types)
 
     def get_label(self, idx):
         item = self.items[idx]
@@ -75,16 +93,7 @@ class WavDataset(Dataset):
             for i in range(len(att))
         ]
 
-        max_len = max(p.shape[0] for p in processed_list)
-
-        padded_list = []
-        for p in processed_list:
-            if p.shape[0] < max_len:
-                repeat_times = (max_len + p.shape[0] - 1) // p.shape[0]  # 向上取整
-                p = p.repeat(repeat_times, *[1] * (p.dim() - 1))[:max_len]
-            padded_list.append(p)
-
-        processed = torch.stack(padded_list, dim=0).to(torch.float32)
+        processed = torch.stack(processed_list, dim=0).to(torch.float32)
 
         return processed
 
@@ -100,9 +109,6 @@ class WavDataset(Dataset):
         return waveform, label, att
 
 
-
-
-
 if __name__ == '__main__':
     pass
 
@@ -112,18 +118,21 @@ if __name__ == '__main__':
 
     machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve']
 
-    machine2AxD = {}
-
+    machine2attinfos = read_json(preset.dpath_machine2attinfos) if os.path.exists(preset.dpath_machine2attinfos) else {}
     for machine in machines:
         dataset = WavDataset(part=P_devtrain, machine=machine)
         dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=0)
+        machine2attinfos[machine] = dataset.attinfos
 
         for batch in dataloader:
-            x_BxT, y_B, atts_BxAxD = batch
-            A = atts_BxAxD.shape[1]
-            D = atts_BxAxD.shape[2]
-            print(atts_BxAxD)
-            machine2AxD[machine] = (A, D)
+            x_BxT, y_B, atts_BxA = batch
+
+            print(f"{x_BxT.shape =}\t{x_BxT.dtype=}")
+            print(f"{y_B.shape =}\t{x_BxT.dtype=}")
+            print(f"{atts_BxA.shape =}\t{x_BxT.dtype=}")
+            print()
             break
 
-    print(machine2AxD)
+    print(machine2attinfos)
+
+    save_json(machine2attinfos, preset.dpath_machine2attinfos)

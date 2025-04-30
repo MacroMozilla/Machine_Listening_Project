@@ -22,8 +22,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 20
 epochs = 50
 learning_rate = 1e-3
-latent_dim = 64
-patience = 5
+latent_dim = 128
+patience = 10
 save_dir = os.path.join(preset.dpath_custom_models, WavDataset.__name__)
 os.makedirs(save_dir, exist_ok=True)
 
