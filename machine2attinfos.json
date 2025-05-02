@@ -1,0 +1,142 @@
+{
+    "bearing": [
+        {
+            "type": "int",
+            "mean": 12.554,
+            "std": 4.9153925580771265,
+            "enum": null
+        },
+        {
+            "type": "str",
+            "mean": null,
+            "std": null,
+            "enum": [
+                "A",
+                "B",
+                "C",
+                "D",
+                "E",
+                "F",
+                "G",
+                "H"
+            ]
+        }
+    ],
+    "fan": [
+        {
+            "type": "str",
+            "mean": null,
+            "std": null,
+            "enum": [
+                "W",
+                "X",
+                "Y",
+                "Z"
+            ]
+        }
+    ],
+    "gearbox": [
+        {
+            "type": "int",
+            "mean": 1.398,
+            "std": 0.6615103929644643,
+            "enum": null
+        },
+        {
+            "type": "int",
+            "mean": 50.4,
+            "std": 71.11146180469082,
+            "enum": null
+        }
+    ],
+    "slider": [
+        {
+            "type": "int",
+            "mean": 634.46,
+            "std": 227.75141799778106,
+            "enum": null
+        },
+        {
+            "type": "int",
+            "mean": 0.0,
+            "std": 0.0,
+            "enum": null
+        }
+    ],
+    "ToyCar": [
+        {
+            "type": "str",
+            "mean": null,
+            "std": null,
+            "enum": [
+                "A1",
+                "A2",
+                "B1",
+                "B2",
+                "C1",
+                "C2",
+                "D1",
+                "D2",
+                "E1",
+                "E2"
+            ]
+        },
+        {
+            "type": "str",
+            "mean": null,
+            "std": null,
+            "enum": [
+                "28V",
+                "31V",
+                "34V",
+                "37V",
+                "40V"
+            ]
+        },
+        {
+            "type": "int",
+            "mean": 1.01,
+            "std": 0.099498743710662,
+            "enum": null
+        }
+    ],
+    "ToyTrain": [
+        {
+            "type": "str",
+            "mean": null,
+            "std": null,
+            "enum": [
+                "A1",
+                "A2",
+                "B1",
+                "B2",
+                "C1",
+                "C2",
+                "D1",
+                "D2",
+                "E1",
+                "E2"
+            ]
+        },
+        {
+            "type": "int",
+            "mean": 8.345,
+            "std": 1.2868469217432197,
+            "enum": null
+        },
+        {
+            "type": "int",
+            "mean": 1.01,
+            "std": 0.099498743710662,
+            "enum": null
+        }
+    ],
+    "valve": [
+        {
+            "type": "int",
+            "mean": 0.52,
+            "std": 0.5381449618829485,
+            "enum": null
+        }
+    ]
+}
