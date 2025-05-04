@@ -62,6 +62,7 @@ class FeatureExtractor(nn.Module):
         self.out_features = F_out
 
         # Temporal encoder: operates over time dimension
+        # More flexibility
         self.encoder = nn.Sequential(
             nn.Conv1d(F_in, 256, kernel_size=5, padding=2),  # (B, 256, T)
             nn.BatchNorm1d(256),
@@ -93,43 +94,144 @@ class FeatureExtractor(nn.Module):
 
         return self.fc(combined)  # (B, F_out)
 
+# --- SE Block Definition ---
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction),
+            nn.ReLU(),
+            nn.Linear(channels // reduction, channels),
+            nn.Sigmoid()
+        )
 
+    def forward(self, x):  # x: (B, C, T)
+        b, c, _ = x.size()
+        y = self.pool(x).view(b, c)           # (B, C)
+        y = self.fc(y).view(b, c, 1)          # (B, C, 1)
+        return x * y   
+
+# class RawFeatureExtractor(nn.Module):
+#     def __init__(self, F_in=16000, F_out=128):
+#         super().__init__()
+#         self.out_features = F_out
+
+#         # Efficient Conv Blocks (with downsampling via stride)
+#         # Doing different kernel sizes.
+#         # More flexibility
+#         self.encoder = nn.Sequential(
+#             nn.Conv1d(1, 8, kernel_size=8, stride=4, padding=3),  # (B, 32, 4000)
+#             nn.BatchNorm1d(8),
+#             nn.ReLU(),
+
+#             nn.Conv1d(8, 16, kernel_size=6, stride=2, padding=3),  # (B, 64, 2000)
+#             nn.BatchNorm1d(16),
+#             nn.ReLU(),
+
+#             nn.Conv1d(16, 32, kernel_size=5, stride=2, padding=2),  # (B, 128, 1000)
+#             nn.BatchNorm1d(32),
+#             nn.ReLU(),
+
+#             nn.Conv1d(32, 128, kernel_size=5, stride=2, padding=2),  # (B, 128, 500)
+#             nn.BatchNorm1d(128),
+#             nn.ReLU(),
+#         )
+
+#         self.adapool = nn.AdaptiveMaxPool1d(1)  # (B, 128, 1)
+#         self.dropout = nn.Dropout(p=0.3)
+#         self.fc = nn.Linear(128 * 2, F_out)  # max + mean → (B, 256) → (B, 128)
+
+#     def forward(self, x):  # (B, 1, 16000)
+#         x = self.encoder(x)  # → (B, 128, 500)
+
+#         max_pooled = self.adapool(x).squeeze(-1)  # (B, 128)
+#         mean_pooled = x.mean(dim=-1)  # (B, 128)
+
+#         combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 256)
+
+#         return self.fc(self.dropout(combined))  # (B, 128)
+
+class ResidualBlock1D(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, use_se=True):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        self.se = SEBlock(out_channels) if use_se else nn.Identity()
+        self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride) \
+            if in_channels != out_channels or stride > 1 else nn.Identity()
+
+    def forward(self, x):
+        residual = self.shortcut(x)
+        out = self.conv(x)
+        out = self.se(out)
+
+        # Align lengths if they mismatch (usually by 1)
+        if out.shape[-1] != residual.shape[-1]:
+            min_len = min(out.shape[-1], residual.shape[-1])
+            out = out[:, :, :min_len]
+            residual = residual[:, :, :min_len]
+
+        return out + residual
+    
 class RawFeatureExtractor(nn.Module):
     def __init__(self, F_in=16000, F_out=128):
         super().__init__()
         self.out_features = F_out
 
-        # Efficient Conv Blocks (with downsampling via stride)
-        self.encoder = nn.Sequential(
-            nn.Conv1d(1, 8, kernel_size=11, stride=4, padding=5),  # (B, 32, 4000)
-            nn.BatchNorm1d(8),
-            nn.ReLU(),
+        # self.block1 = nn.Sequential(
+        #     nn.Conv1d(1, 8, kernel_size=11, stride=4, padding=3),
+        #     nn.BatchNorm1d(8),
+        #     nn.ReLU(),
+        #     SEBlock(8)
+        # )
 
-            nn.Conv1d(8, 16, kernel_size=7, stride=2, padding=3),  # (B, 64, 2000)
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
+        # self.block2 = nn.Sequential(
+        #     nn.Conv1d(8, 16, kernel_size=9, stride=2, padding=3),
+        #     nn.BatchNorm1d(16),
+        #     nn.ReLU(),
+        #     SEBlock(16)
+        # )
 
-            nn.Conv1d(16, 32, kernel_size=5, stride=2, padding=2),  # (B, 128, 1000)
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
+        # self.block3 = nn.Sequential(
+        #     nn.Conv1d(16, 32, kernel_size=7, stride=2, padding=2),
+        #     nn.BatchNorm1d(32),
+        #     nn.ReLU(),
+        #     SEBlock(32)
+        # )
 
-            nn.Conv1d(32, 128, kernel_size=5, stride=2, padding=2),  # (B, 128, 500)
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-        )
+        # self.block4 = nn.Sequential(
+        #     nn.Conv1d(32, 128, kernel_size=5, stride=2, padding=2),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #     SEBlock(128)
+        # )
 
-        self.adapool = nn.AdaptiveMaxPool1d(1)  # (B, 128, 1)
-        self.fc = nn.Linear(128 * 2, F_out)  # max + mean → (B, 256) → (B, 128)
+        self.block1 = ResidualBlock1D(1, 8, kernel_size=7, stride=2, padding=3)
+
+        self.block2 = ResidualBlock1D(8, 16, kernel_size=5, stride=2, padding=3)
+
+        self.block3 = ResidualBlock1D(16, 32, kernel_size=3, stride=2, padding=2)
+
+        self.block4 = ResidualBlock1D(32, 128, kernel_size=3, stride=2, padding=2)
+
+        self.adapool = nn.AdaptiveMaxPool1d(1)
+        self.fc = nn.Linear(128 * 2, F_out)  # max + mean
 
     def forward(self, x):  # (B, 1, 16000)
-        x = self.encoder(x)  # → (B, 128, 500)
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.block3(x)
+        x = self.block4(x)
 
         max_pooled = self.adapool(x).squeeze(-1)  # (B, 128)
-        mean_pooled = x.mean(dim=-1)  # (B, 128)
-
+        mean_pooled = x.mean(dim=-1)              # (B, 128)
         combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 256)
 
-        return self.fc(combined)  # (B, 128)
+        return self.fc(combined)
 
 
 class EmbeddingModel(nn.Module):

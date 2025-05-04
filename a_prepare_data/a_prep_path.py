@@ -2,7 +2,9 @@ import os
 from pprint import pprint
 
 import pandas as pd
+import sys
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import preset
 from f_utility.io_tools import save_json
 

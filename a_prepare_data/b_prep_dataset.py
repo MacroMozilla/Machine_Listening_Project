@@ -5,7 +5,8 @@ import torch
 import torchaudio
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
 from f_utility.io_tools import read_json, save_json

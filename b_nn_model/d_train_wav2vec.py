@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from a_nn_metrics import compute_metrics
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
 from a_prepare_data.c_prep_dataset_wav2vec import Wav2VecDataset

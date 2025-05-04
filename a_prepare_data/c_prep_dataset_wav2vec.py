@@ -3,6 +3,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from transformers import Wav2Vec2Model
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
 from a_prepare_data.b_prep_dataset import WavDataset
