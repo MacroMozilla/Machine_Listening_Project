@@ -9,6 +9,51 @@ from f_utility.io_tools import read_json
 
 machine2attinfos = read_json(preset.dpath_machine2attinfos) if os.path.exists(preset.dpath_machine2attinfos) else {}
 
+class ResidualBlock1D(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1):
+        super().__init__()
+        self.same_shape = (in_channels == out_channels) and (stride == 1)
+
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, padding=kernel_size//2, stride=stride),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(),
+
+            nn.Conv1d(out_channels, out_channels, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.BatchNorm1d(out_channels)
+        )
+
+        self.skip = (
+            nn.Identity() if self.same_shape
+            else nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride)
+        )
+
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.conv_block(x) + self.skip(x))
+
+class DualFeatureEncoder(nn.Module):
+    def __init__(self, machine, raw_dim=16000, mel_dim=128, embed_dim=128):
+        super().__init__()
+        self.encoder_raw = RawFeatureExtractor(F_in=raw_dim, F_out=embed_dim)
+        self.encoder_logmel = FeatureExtractor(F_in=mel_dim, F_out=embed_dim)
+        self.embed_att = EmbedAtt(machine)
+        self.linear = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, waveform_BxT, logmel_BxTxF, att_BxA, lam):
+        raw_input = waveform_BxT.unsqueeze(1)        # (B, 1, T)
+        raw_feat = self.encoder_raw(raw_input)       # (B, D)
+
+        logmel_feat = self.encoder_logmel(logmel_BxTxF)  # (B, D)
+
+        x_embed = lam * raw_feat + (1 - lam) * logmel_feat
+        x_embed = self.linear(x_embed)
+
+        att_embed = self.embed_att(att_BxA)
+        att_embed = self.linear(att_embed)
+
+        return x_embed, att_embed
 
 # --- Model Definitions ---
 class EmbedAtt(nn.Module):
@@ -56,78 +101,60 @@ class EmbedAtt(nn.Module):
 
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, F_in=768, F_out=128):
+    def __init__(self, F_in=128, F_out=128):
         super().__init__()
-        self.F_in = F_in
-        self.out_features = F_out
 
-        # Temporal encoder: operates over time dimension
         self.encoder = nn.Sequential(
-            nn.Conv1d(F_in, 256, kernel_size=5, padding=2),  # (B, 256, T)
-            nn.BatchNorm1d(256),
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),  # (B, 1, T, F) → (B, 32, T, F)
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2),  # (B, 256, T//2)
 
-            nn.Conv1d(256, 128, kernel_size=3, padding=1),  # (B, 128, T//2)
-            nn.BatchNorm1d(128),
+            nn.Conv2d(32, 64, kernel_size=3, stride=(2,2), padding=1),  # T,F → T/2,F/2
+            nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2)  # (B, 128, T//4)
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=(2,2), padding=1),  # T,F → T/4,F/4
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
         )
 
-        self.adapool = nn.AdaptiveMaxPool1d(1)  # (B, 128, 1)
-        self.fc = nn.Linear(128 * 2, F_out)  # max + mean → 256 → 128
+        self.adapool = nn.AdaptiveAvgPool2d((1, 1))  # → (B, 128, 1, 1)
+        self.fc = nn.Linear(128, F_out)
 
     def forward(self, x_TxF):  # Input: (B, T, F)
-        B, T, F = x_TxF.shape
-        assert F == self.F_in, f"Expected F={self.F_in}, got {F}"
+        x = x_TxF.unsqueeze(1)  # (B, 1, T, F)
+        x = self.encoder(x)     # (B, 128, T//4, F//4)
+        x = self.adapool(x).squeeze(-1).squeeze(-1)  # (B, 128)
+        return self.fc(x)       # (B, F_out)
 
-        x = x_TxF.transpose(1, 2)  # → (B, F, T)
-        x = self.encoder(x)  # → (B, 128, T’)
-
-        max_pooled = self.adapool(x).squeeze(-1)  # (B, 128)
-        mean_pooled = x.mean(dim=-1)  # (B, 128)
-
-        combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 256)
-
-        return self.fc(combined)  # (B, F_out)
 
 
 class RawFeatureExtractor(nn.Module):
     def __init__(self, F_in=16000, F_out=128):
         super().__init__()
-        self.out_features = F_out
 
-        # Efficient Conv Blocks (with downsampling via stride)
         self.encoder = nn.Sequential(
-            nn.Conv1d(1, 8, kernel_size=11, stride=4, padding=5),  # (B, 32, 4000)
-            nn.BatchNorm1d(8),
-            nn.ReLU(),
-
-            nn.Conv1d(8, 16, kernel_size=7, stride=2, padding=3),  # (B, 64, 2000)
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-
-            nn.Conv1d(16, 32, kernel_size=5, stride=2, padding=2),  # (B, 128, 1000)
+            nn.Conv1d(1, 32, kernel_size=11, stride=4, padding=5),  # Downsample T → T/4
             nn.BatchNorm1d(32),
             nn.ReLU(),
 
-            nn.Conv1d(32, 128, kernel_size=5, stride=2, padding=2),  # (B, 128, 500)
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
+            ResidualBlock1D(32, 64, stride=2),   # T → T/8
+            ResidualBlock1D(64, 128, stride=2),  # T → T/16
+            ResidualBlock1D(128, 128, stride=2)  # T → T/32
         )
 
-        self.adapool = nn.AdaptiveMaxPool1d(1)  # (B, 128, 1)
+        self.adapool = nn.AdaptiveMaxPool1d(1)
         self.fc = nn.Linear(128 * 2, F_out)  # max + mean → (B, 256) → (B, 128)
 
-    def forward(self, x):  # (B, 1, 16000)
-        x = self.encoder(x)  # → (B, 128, 500)
+    def forward(self, x):  # (B, 1, T)
+        x = self.encoder(x)
 
         max_pooled = self.adapool(x).squeeze(-1)  # (B, 128)
-        mean_pooled = x.mean(dim=-1)  # (B, 128)
+        mean_pooled = x.mean(dim=-1)              # (B, 128)
 
         combined = torch.cat([max_pooled, mean_pooled], dim=-1)  # (B, 256)
+        return self.fc(combined)  # (B, F_out)
 
-        return self.fc(combined)  # (B, 128)
 
 
 class EmbeddingModel(nn.Module):
