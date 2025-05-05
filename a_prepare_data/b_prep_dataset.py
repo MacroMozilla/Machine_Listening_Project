@@ -16,11 +16,17 @@ machine2attinfos = read_json(preset.dpath_machine2attinfos) if os.path.exists(pr
 
 
 class WavDataset(Dataset):
-    def __init__(self, part, machine):
+    def __init__(self, part, machine, domain='all'):
         self.part = part
         self.machine = machine
+        self.domain = domain
 
-        self.items = info[part][machine]
+        self.items = []
+
+        for item in info[part][machine]:
+            if self.domain == 'all' or (self.domain == item['domain']):
+                self.items.append(item)
+
         cols = list(zip(*[[v for v in item['att']] for item in self.items]))
 
         self.attinfos = []
@@ -125,11 +131,11 @@ if __name__ == '__main__':
         machine2attinfos[machine] = dataset.attinfos
 
         for batch in dataloader:
-            x_BxT, y_B, atts_BxA = batch
+            x_Bx1xT, y_B, atts_BxA = batch
 
-            print(f"{x_BxT.shape =}\t{x_BxT.dtype=}")
-            print(f"{y_B.shape =}\t{x_BxT.dtype=}")
-            print(f"{atts_BxA.shape =}\t{x_BxT.dtype=}")
+            print(f"{x_Bx1xT.shape =}\t{x_Bx1xT.dtype=}") # [32, 1, 160000]
+            print(f"{y_B.shape =}\t{x_Bx1xT.dtype=}")
+            print(f"{atts_BxA.shape =}\t{x_Bx1xT.dtype=}")
             print()
             break
 

@@ -61,6 +61,9 @@ def get_current_time():
     """获取当前时间戳"""
     return datetime.now()
 
+def datetime2fbody(dt):
+    return dt.strftime('%y%m%d_%H%M%S')
+
 if __name__ == '__main__':
     pass
     w = Watch()
