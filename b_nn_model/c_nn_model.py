@@ -198,9 +198,9 @@ class RawFeatureExtractorRB(nn.Module):
         super().__init__()
         self.out_features = F_out
 
-        self.rb1 = ResidualBlock(128, 256, kernel_size=7, stride=2, padding=7)
+        self.rb1 = ResidualBlock(768, 512, kernel_size=7, stride=2, padding=7)
 
-        self.rb2 = ResidualBlock(256, 256, kernel_size=5, stride=2, padding=5)
+        self.rb2 = ResidualBlock(512, 256, kernel_size=5, stride=2, padding=5)
 
         self.rb3 = ResidualBlock(256, 256, kernel_size=3, stride=2, padding=3)
 
@@ -259,6 +259,28 @@ class RawFeatureExtractor(nn.Module):
         return self.fc(combined)  # (B, 128)
 
 
+# class EmbeddingModel(nn.Module):
+#     def __init__(self, machine, dropout_rate=0.3, embed_dim=128, out_dim=128, attbind='add', feature_extractor=RawFeatureExtractorRB):
+#         super().__init__()
+#         self.embed_wav = feature_extractor
+#         self.embed_att = EmbedAtt(machine, out_dim=embed_dim, attbind=attbind)
+#         self.linear_wav = nn.Linear(embed_dim, out_dim)
+#         self.linear_att = nn.Linear(embed_dim, out_dim)
+
+#         self.dropout = nn.Dropout(p=dropout_rate)
+
+#     def forward(self, x_TxF, att_AxD):
+#         x_embed = self.embed_wav(x_TxF)
+#         att_embed = self.embed_att(att_AxD)
+
+#         x_embed = self.dropout(x_embed)
+#         att_embed = self.dropout(att_embed)
+
+#         x_embed = self.linear_wav(x_embed)
+#         att_embed = self.linear_att(att_embed)
+
+#         return x_embed, att_embed
+    
 class EmbeddingModel(nn.Module):
     def __init__(self, machine, dropout_rate=0.25, F_in=768, embed_dim=128, out_dim=128, feature_extractor=RawFeatureExtractorRB):
         super().__init__()
