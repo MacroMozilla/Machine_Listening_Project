@@ -9,14 +9,14 @@ import numpy as np
 import pandas as pd
 
 
-def save_jsonl(data: List[Any], filename: str) -> None:
+def save_jsonl(data: List[Any], filename: str, mode='w') -> None:
     """
     将数据保存为JSONL格式的文件。
 
     :param data: 要保存的数据，列表中的每个元素都应该是可序列化为JSON的对象。
     :param filename: 保存文件的名称。
     """
-    with open(filename, 'w', encoding='utf-8') as file:
+    with open(filename, mode, encoding='utf-8') as file:
         for entry in data:
             json_line = json.dumps(entry, ensure_ascii=False)  # 将对象转换为JSON字符串
             file.write(json_line + '\n')  # 写入文件，每个对象后换行

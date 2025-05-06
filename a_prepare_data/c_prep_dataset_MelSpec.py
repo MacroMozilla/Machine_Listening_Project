@@ -13,8 +13,8 @@ device_gpu = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class MelSpecDataset(Dataset):
-    def __init__(self, part, machine):
-        self.wavdataset = WavDataset(part, machine)
+    def __init__(self, part, machine,domain='all'):
+        self.wavdataset = WavDataset(part, machine,domain=domain)
 
         # Internal config (not exposed)
         self._sample_rate = 16000
@@ -78,4 +78,3 @@ if __name__ == '__main__':
                 # print(x_TxF.shape)
                 # break
 
-    
