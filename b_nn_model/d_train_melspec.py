@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from a_nn_metrics import compute_metrics
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
 from a_prepare_data.c_prep_dataset_MelSpec import MelSpecDataset
@@ -25,7 +27,7 @@ batch_size = 20
 epochs = 50
 learning_rate = 1e-3
 latent_dim = 128
-patience = 10
+patience = 15
 save_dir = os.path.join(preset.dpath_custom_models, MelSpecDataset.__name__)
 os.makedirs(save_dir, exist_ok=True)
 
