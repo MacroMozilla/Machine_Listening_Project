@@ -59,7 +59,13 @@ class PrepInfo():
                         elif '_anomaly_' in fname:
                             label = -1
 
-                        item = {'label': label} | {'att': [smart_cast(row[key]) for key in list(row.keys()) if 'v' in key]} | {'fpath': fpath}
+                        domain = ''
+                        if '_source_' in fname:
+                            domain = 'source'
+                        elif '_target_' in fname:
+                            domain = 'target'
+
+                        item = {'label': label} | {'att': [smart_cast(row[key]) for key in list(row.keys()) if 'v' in key]} | {'fpath': fpath} | {'domain': domain}
                         items.append(item)
 
                 self.machine2items[machine] = items
@@ -89,7 +95,13 @@ class PrepInfo():
                         elif '_anomaly_' in fname:
                             label = -1
 
-                        item = {'label': label} | {'att': [smart_cast(row[key]) for key in list(row.keys()) if 'v' in key]} | {'fpath': fpath}
+                        domain = ''
+                        if '_source_' in fname:
+                            domain = 'source'
+                        elif '_target_' in fname:
+                            domain = 'target'
+
+                        item = {'label': label} | {'att': [smart_cast(row[key]) for key in list(row.keys()) if 'v' in key]} | {'fpath': fpath} | {'domain': domain}
                         items.append(item)
 
                 self.machine2items[machine] = items
@@ -99,7 +111,6 @@ class PrepInfo():
 
 part2machine2info = {}
 info_dev_train = {}
-
 
 # dev train
 # dev test

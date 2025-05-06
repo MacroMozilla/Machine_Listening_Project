@@ -19,8 +19,8 @@ model.eval()
 
 class Wav2VecDataset(Dataset):
 
-    def __init__(self, part, machine):
-        self.wavdataset = WavDataset(part, machine)
+    def __init__(self, part, machine,domain='all'):
+        self.wavdataset = WavDataset(part, machine,domain=domain)
 
     def __len__(self):
         return len(self.wavdataset)
