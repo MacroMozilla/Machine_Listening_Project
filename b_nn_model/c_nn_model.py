@@ -42,7 +42,7 @@ class ResNetMLP(nn.Module):
 
 # --- Model Definitions ---
 class EmbedAtt(nn.Module):
-    def __init__(self, machine, out_dim=128, eps=1e-5):
+    def __init__(self, machine, out_dim=128, attbind='add', eps=1e-5):
         super().__init__()
         self.eps = eps
         self.attinfos = machine2attinfos[machine]  # List of dicts
@@ -60,7 +60,9 @@ class EmbedAtt(nn.Module):
                 raise ValueError(f"Unknown attribute type: {attinfo['type']}")
             self.embedders.append(embed)
 
-        # self.project_out = nn.Linear(hidden_dim, out_dim)
+        self.attbind = attbind
+        if self.attbind == 'cat':
+            self.project_out = nn.Linear(self.hidden_dim * len(self.attinfos), out_dim)
 
     def forward(self, x):  # x: [B, A]
         B, A = x.shape
@@ -81,7 +83,10 @@ class EmbedAtt(nn.Module):
                 hi = self.embedders[i](xi)  # shape [B, H]
             outputs.append(hi)
 
-        h = torch.sum(torch.stack(outputs, dim=0), dim=0)  # shape [B, A*H]
+        if self.attbind == 'add':
+            h = torch.sum(torch.stack(outputs, dim=0), dim=0)  # shape [B, A*H]
+        elif self.attbind == 'cat':
+            h = self.project_out(torch.cat(outputs, dim=-1))
         return h
 
 
@@ -197,10 +202,10 @@ class RawFeatureExtractor(nn.Module):
 
 
 class EmbeddingModel(nn.Module):
-    def __init__(self, machine, dropout_rate=0.3, embed_dim=128, out_dim=128, feature_extractor=FeatureExtractor):
+    def __init__(self, machine, dropout_rate=0.3, embed_dim=128, out_dim=128, attbind='add', feature_extractor=FeatureExtractor):
         super().__init__()
         self.embed_wav = feature_extractor
-        self.embed_att = EmbedAtt(machine, out_dim=embed_dim)
+        self.embed_att = EmbedAtt(machine, out_dim=embed_dim, attbind=attbind)
         self.linear_wav = nn.Linear(embed_dim, out_dim)
         self.linear_att = nn.Linear(embed_dim, out_dim)
 

@@ -52,12 +52,14 @@ def train_with_config(config):
     output_dim = config.get('output_dim', 128)
     patience = config.get('patience', 15)
     dropout = config.get('dropout', 0.25)
+    attbind = config.get('attbind', 'add')
 
     datasetcls = {'WavDataset': WavDataset, 'Wav2VecDataset': Wav2VecDataset, 'MelSpecDataset': MelSpecDataset}.get(config['datasetcls'])
 
     lossfctncls = {'CosineSimilarityLoss': CosineSimilarity01, 'LearnableAdaCosLoss': LearnableAdaCosLoss}.get(config['lossfctncls'])
 
-    save_dir = os.path.join(preset.dpath_custom_models, f"{datasetcls.__name__}_{hash_config_to_hex(config)[:10]}_{datetime2fbody(datetime.now())}")
+    fname = f"{datasetcls.__name__}_{hash_config_to_hex(config)[:10]}_{datetime2fbody(datetime.now())}"
+    save_dir = os.path.join(preset.dpath_custom_models, fname)
     os.makedirs(save_dir, exist_ok=True)
 
     machines = ['bearing', 'fan', 'gearbox', 'slider', 'ToyCar', 'ToyTrain', 'valve'][:]
@@ -79,11 +81,11 @@ def train_with_config(config):
 
         # Initialize model, optimizer, etc.
         if config['datasetcls'] == 'WavDataset':
-            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=RawFeatureExtractor(F_in=160000, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim).to(device)
+            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=RawFeatureExtractor(F_in=160000, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim, attbind=attbind).to(device)
         elif config['datasetcls'] == 'MelSpecDataset':
-            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=FeatureExtractor(F_in=128, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim).to(device)
+            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=FeatureExtractor(F_in=128, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim, attbind=attbind).to(device)
         elif config['datasetcls'] == 'Wav2VecDataset':
-            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=FeatureExtractor(F_in=768, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim).to(device)
+            model_embed = EmbeddingModel(machine=machine, dropout_rate=dropout, feature_extractor=FeatureExtractor(F_in=768, F_out=latent_dim), embed_dim=latent_dim, out_dim=output_dim, attbind=attbind).to(device)
         else:
             raise Exception(f"{config['datasetcls']=} is not supported!")
 
@@ -118,10 +120,11 @@ def train_with_config(config):
                 loss.backward()
                 optimizer.step()
 
-                train_cosim_s.extend(cosim_B.detach().cpu().numpy().tolist())
+                train_cosim_s.extend(cosim_B.clamp(min=0.0).detach().cpu().numpy().tolist())
 
             train_cosim_mean = np.mean(train_cosim_s)
             train_cosim_std = np.std(train_cosim_s)
+            train_cosim_min = np.min(train_cosim_s)
 
             # --- Validation ---
             model_embed.eval()
@@ -209,7 +212,7 @@ def train_with_config(config):
         evalinfo_mean = {}
         evalinfo_mean['domain'] = domain
         for key in ['AUC', 'pAUC', 'F1', 'Accuracy', 'Precision', 'Recall']:
-            val = float(np.mean([einfo['AUC'] for einfo in evalinfos_domain]).round(4))
+            val = float(np.mean([einfo[key] for einfo in evalinfos_domain]).round(4))
             evalinfo_mean[key] = val
         evalinfos_mean.append(evalinfo_mean)
 
@@ -220,30 +223,39 @@ def train_with_config(config):
     print("\n📈 Overall mean metrics:")
 
     config['mAUC'] = [einfo for einfo in evalinfos_mean if einfo['domain'] == 'all'][0]['AUC']
+    config['fname'] = fname
 
     save_json(config, os.path.join(save_dir, "config.json"))
 
     save_jsonl([config], os.path.join(preset.dpath_custom_models, "smry.jsonl"), mode='a')
 
+    infos = read_jsonl(os.path.join(preset.dpath_custom_models, "smry.jsonl"))
+    infos.sort(key=lambda x: x['mAUC'], reverse=True)
+    df = pd.DataFrame(infos)
+    df.to_csv(os.path.join(preset.dpath_custom_models, "smry.csv"), index=False)
+
 
 if __name__ == '__main__':
     pass
 
-    for datasetcls in ['WavDataset', 'Wav2VecDataset', 'MelSpecDataset'][:1]:
-        for lossfctncls in ['CosineSimilarityLoss', 'LearnableAdaCosLoss']:
-            for latent_dim in [32, 64, 128, 256, 512]:
-                for output_dim in [32, 64, 256, 512]:
-                    for dropout in [0, 0.25, 0.5]:
-                        config = {
-                            'batch_size': 20,
-                            'epochs': 50,
-                            'learning_rate': 1e-3,
-                            'latent_dim': latent_dim,
-                            'output_dim': output_dim,
-                            'patience': 15,
-                            'dropout': dropout,
-                            'datasetcls': datasetcls,
-                            'lossfctncls': lossfctncls,
-                        }
-                        pprint(config)
-                        train_with_config(config)
+    dims = [256, 512, 1024, 2048]
+    for datasetcls in ['WavDataset', 'Wav2VecDataset', 'MelSpecDataset'][:]:
+        for attbind in ['add']:
+            for lossfctncls in ['CosineSimilarityLoss', 'LearnableAdaCosLoss'][:1]:
+                for i, latent_dim in enumerate([128]):
+                    for j, output_dim in enumerate([256]):
+                        for dropout in [0.125, 0.25]:
+                            config = {
+                                'batch_size': 20,
+                                'epochs': 50,
+                                'learning_rate': 1e-3,
+                                'latent_dim': latent_dim,
+                                'output_dim': output_dim,
+                                'patience': 15,
+                                'dropout': dropout,
+                                'datasetcls': datasetcls,
+                                'lossfctncls': lossfctncls,
+                                'attbind': attbind,
+                            }
+                            pprint(config)
+                            train_with_config(config)
