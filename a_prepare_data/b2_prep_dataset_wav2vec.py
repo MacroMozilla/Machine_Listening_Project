@@ -42,6 +42,10 @@ class Wav2VecDataset(Dataset):
 
             torch.save(x_TxF, fpath_cache)
 
+        target_T = 599
+        T, F = x_TxF.shape
+        x_TxF = torch.nn.functional.pad(x_TxF[:target_T], (0, 0, 0, max(0, target_T - T)))  # Pad on T
+
         label = self.wavdataset.get_label(idx)
         att = self.wavdataset.get_att(idx)
         machine = self.wavdataset.get_machine(idx)
