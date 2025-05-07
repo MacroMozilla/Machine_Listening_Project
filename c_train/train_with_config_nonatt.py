@@ -174,14 +174,12 @@ def train_with_config(config):
 
             print(f"→ Epoch {epoch + 1} | [{machine}] | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_auc_source:.6f},{test_auc_target:.6f} = {test_auc:.6f}")
 
-            writer.add_scalar(f'{machine}/train/all/cosim', train_cosim_mean, epoch)
-            writer.add_scalar(f'{machine}/test/source/auc', test_auc_source, epoch)
-            writer.add_scalar(f'{machine}/test/target/auc', test_auc_target, epoch)
-            writer.add_scalar(f'{machine}/test/all/auc', test_auc, epoch)
-
         test_auc = np.mean(test_auc_s)
         test_source_auc = np.mean(test_source_auc_s)
         test_target_auc = np.mean(test_target_auc_s)
+
+        writer.add_scalar(f'all/train/all/cosim', train_cosim_mean, epoch)
+        writer.add_scalar(f'all/test/all/auc', test_auc, epoch)
 
         print(f"→ Epoch {epoch + 1} | [all] | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_source_auc:.6f},{test_target_auc:.6f} = {test_auc:.6f}")
 

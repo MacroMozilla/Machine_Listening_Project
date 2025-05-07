@@ -164,8 +164,6 @@ def train_with_config(config):
             print(f"→ Epoch {epoch + 1} | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_auc_source:.6f},{test_auc_target:.6f} = {test_auc:.6f}")
 
             writer.add_scalar(f'{machine}/train/all/cosim', train_cosim_mean, epoch)
-            writer.add_scalar(f'{machine}/test/source/auc', test_auc_source, epoch)
-            writer.add_scalar(f'{machine}/test/target/auc', test_auc_target, epoch)
             writer.add_scalar(f'{machine}/test/all/auc', test_auc, epoch)
 
             # --- Save the best model ---
