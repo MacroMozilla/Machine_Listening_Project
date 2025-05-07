@@ -89,6 +89,13 @@ class EmbedAtt(nn.Module):
             h = self.project_out(torch.cat(outputs, dim=-1))
         return h
 
+class EmbedMachine(nn.Module):
+    def __init__(self, N_machine, out_dim=128):
+        super().__init__()
+        self.embedding = nn.Embedding(N_machine, out_dim)
+
+    def forward(self, x):  # x: [B], int64 tensor of machine indices
+        return self.embedding(x)  # returns [B, out_dim]
 
 class FeatureExtractor(nn.Module):
     def __init__(self, F_in=768, F_out=128, dropout=0.3):
@@ -101,12 +108,12 @@ class FeatureExtractor(nn.Module):
             nn.BatchNorm1d(256),
             nn.ReLU(),
 
-            nn.Conv1d(256, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
+            nn.Conv1d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
 
-            nn.Conv1d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
+            nn.Conv1d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
 
             nn.Dropout(dropout)
@@ -114,7 +121,7 @@ class FeatureExtractor(nn.Module):
 
         self.fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(128 * 4, F_out)  # mean + std + max + median
+            nn.Linear(256 * 4, F_out)  # mean + std + max + median
         )
 
     def forward(self, x):  # x: (B, T, F_in)
@@ -202,10 +209,10 @@ class RawFeatureExtractor(nn.Module):
 
 
 class EmbeddingModel(nn.Module):
-    def __init__(self, machine, dropout_rate=0.3, embed_dim=128, out_dim=128, attbind='add', feature_extractor=FeatureExtractor):
+    def __init__(self,  dropout_rate=0.3, embed_dim=128, out_dim=128,feature_extractor=None,embed_extractor = None ):
         super().__init__()
         self.embed_wav = feature_extractor
-        self.embed_att = EmbedAtt(machine, out_dim=embed_dim, attbind=attbind)
+        self.embed_att = embed_extractor
         self.linear_wav = nn.Linear(embed_dim, out_dim)
         self.linear_att = nn.Linear(embed_dim, out_dim)
 

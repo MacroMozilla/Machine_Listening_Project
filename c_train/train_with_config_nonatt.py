@@ -18,10 +18,10 @@ from a_prepare_data.b2_prep_dataset_wav2vec import Wav2VecDataset
 from b_nn_model.a_nn_metrics import compute_metrics
 import preset
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
-from a_prepare_data.b0_prep_dataset import WavDataset
+from a_prepare_data.b0_prep_dataset import WavDataset, N_machine
 from b_nn_model.a_nn_metrics import compute_auc
 from b_nn_model.b_nn_loss import CosineSimilarity01, matrix_bce_loss_balanced_v2, cosine_similarity_matrix, LearnableAdaCosLoss
-from b_nn_model.c_nn_model import EmbeddingModel, RawFeatureExtractor, FeatureExtractor, EmbedAtt  # 🛠 注意：换成了EmbeddingModel！
+from b_nn_model.c_nn_model import EmbeddingModel, RawFeatureExtractor, FeatureExtractor, EmbedAtt, EmbedMachine  # 🛠 注意：换成了EmbeddingModel！
 
 import os
 import glob
@@ -67,64 +67,71 @@ def train_with_config(config):
     all_eval_results = []
 
     writer = SummaryWriter(save_dir)
-    # --- Main loop ---
-    for machine in machines:
-        print(f"\n===== Training Machine: {machine} =====")
 
-        # Prepare datasets
-        train_dataset = datasetcls(part=P_devtrain, machine=machine)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    # Prepare datasets
+    train_dataset = datasetcls(part=P_devtrain, machine='all')
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
-        test_dataset_source = datasetcls(part=P_devtest, machine=machine, domain='source')
-        test_loader_source = DataLoader(test_dataset_source, batch_size=batch_size, shuffle=False, num_workers=0)
+    # Initialize model, optimizer, etc.
+    if config['datasetcls'] == 'WavDataset':
+        model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=RawFeatureExtractor(F_in=160000, F_out=latent_dim), embed_extractor=EmbedMachine(N_machine=N_machine, out_dim=latent_dim)).to(device)
+    elif config['datasetcls'] == 'MelSpecDataset':
+        model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=FeatureExtractor(F_in=128, F_out=latent_dim), embed_extractor=EmbedMachine(N_machine=N_machine, out_dim=latent_dim)).to(device)
+    elif config['datasetcls'] == 'Wav2VecDataset':
+        model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=FeatureExtractor(F_in=768, F_out=latent_dim), embed_extractor=EmbedMachine(N_machine=N_machine, out_dim=latent_dim)).to(device)
+    else:
+        raise Exception(f"{config['datasetcls']=} is not supported!")
 
-        test_dataset_target = datasetcls(part=P_devtest, machine=machine, domain='target')
-        test_loader_target = DataLoader(test_dataset_target, batch_size=batch_size, shuffle=False, num_workers=0)
+    optimizer = torch.optim.AdamW(model_embed.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=5, factor=0.5)
 
-        # Initialize model, optimizer, etc.
-        if config['datasetcls'] == 'WavDataset':
-            model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=RawFeatureExtractor(F_in=160000, F_out=latent_dim), embed_extractor=EmbedAtt(machine, out_dim=latent_dim, attbind=attbind)).to(device)
-        elif config['datasetcls'] == 'MelSpecDataset':
-            model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=FeatureExtractor(F_in=128, F_out=latent_dim), embed_extractor=EmbedAtt(machine, out_dim=latent_dim, attbind=attbind)).to(device)
-        elif config['datasetcls'] == 'Wav2VecDataset':
-            model_embed = EmbeddingModel(dropout_rate=dropout, embed_dim=latent_dim, out_dim=output_dim, feature_extractor=FeatureExtractor(F_in=768, F_out=latent_dim), embed_extractor=EmbedAtt(machine, out_dim=latent_dim, attbind=attbind)).to(device)
-        else:
-            raise Exception(f"{config['datasetcls']=} is not supported!")
+    lossfctn = lossfctncls()
 
-        optimizer = torch.optim.AdamW(model_embed.parameters(), lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=5, factor=0.5)
+    best_auc = 0
+    patience_counter = 0
 
-        lossfctn = lossfctncls()
+    for epoch in range(epochs):
+        model_embed.train()
 
-        best_auc = 0
-        patience_counter = 0
+        train_cosim_s = []
+        N = len(train_loader.dataset)
+        for x_BxTxF, _, _, machine_B in tqdm(train_loader, desc=f"Train-all Epoch {epoch + 1}"):
+            x_BxTxF, machine_B = x_BxTxF.to(device), machine_B.to(device)
 
-        for epoch in range(epochs):
-            model_embed.train()
+            B, T, F = x_BxTxF.shape
 
-            train_cosim_s = []
-            N = len(train_loader.dataset)
-            for x_BxTxF, _, att_BxAxD, _ in tqdm(train_loader, desc=f"Train-{machine} Epoch {epoch + 1}"):
-                x_BxTxF, att_BxAxD = x_BxTxF.to(device), att_BxAxD.to(device)
+            optimizer.zero_grad()
+            x_embed, machine_embed = model_embed(x_BxTxF, machine_B)
 
-                B, T, F = x_BxTxF.shape
+            if config['lossfctncls'] == 'CosineSimilarityLoss':
+                cosim_B = lossfctn(x_embed, machine_embed)
+                loss = matrix_bce_loss_balanced_v2(cosine_similarity_matrix(x_embed, machine_embed))
+            elif config['lossfctncls'] == 'LearnableAdaCosLoss':
+                cosim_B = lossfctn(x_embed, machine_embed)
+                loss = cosim_B.mean()
 
-                optimizer.zero_grad()
-                x_embed, att_embed = model_embed(x_BxTxF, att_BxAxD)
+            loss.backward()
+            optimizer.step()
 
-                if config['lossfctncls'] == 'CosineSimilarityLoss':
-                    cosim_B = lossfctn(x_embed, att_embed)
-                    loss = matrix_bce_loss_balanced_v2(cosine_similarity_matrix(x_embed, att_embed))
-                elif config['lossfctncls'] == 'LearnableAdaCosLoss':
-                    cosim_B = lossfctn(x_embed, att_embed)
-                    loss = cosim_B.mean()
+            train_cosim_s.extend(cosim_B.clamp(min=0.0).detach().cpu().numpy().tolist())
 
-                loss.backward()
-                optimizer.step()
+        train_cosim_mean = np.mean(train_cosim_s)
 
-                train_cosim_s.extend(cosim_B.clamp(min=0.0).detach().cpu().numpy().tolist())
+        test_auc_s = []
+        test_source_auc_s = []
+        test_target_auc_s = []
 
-            train_cosim_mean = np.mean(train_cosim_s)
+        machine2domain2scores = {}
+        machine2domain2labels = {}
+        # --- Main loop ---
+        for machine in machines:
+            print(f"\n===== Training Machine: {machine} =====")
+
+            test_dataset_source = datasetcls(part=P_devtest, machine=machine, domain='source')
+            test_loader_source = DataLoader(test_dataset_source, batch_size=batch_size, shuffle=False, num_workers=0)
+
+            test_dataset_target = datasetcls(part=P_devtest, machine=machine, domain='target')
+            test_loader_target = DataLoader(test_dataset_target, batch_size=batch_size, shuffle=False, num_workers=0)
 
             # --- Validation ---
             model_embed.eval()
@@ -136,12 +143,12 @@ def train_with_config(config):
                 labels = []
 
                 with torch.no_grad():
-                    for x_BxTxF_val, y_B_val, att_BxAxD_val, _ in tqdm(dataloader, desc=f"Eval-{machine} Epoch {epoch + 1}"):
-                        x_BxTxF_val, att_BxAxD_val = x_BxTxF_val.to(device), att_BxAxD_val.to(device)
+                    for x_BxTxF_val, y_B_val, _, machine_B_val in tqdm(dataloader, desc=f"Eval-{machine} Epoch {epoch + 1}"):
+                        x_BxTxF_val, machine_B_val = x_BxTxF_val.to(device), machine_B_val.to(device)
 
-                        x_embed, att_embed = model_embed(x_BxTxF_val, att_BxAxD_val)
+                        x_embed, machine_embed = model_embed(x_BxTxF_val, machine_B_val)
 
-                        cosine_sim = torch.nn.functional.cosine_similarity(x_embed, att_embed, dim=1)
+                        cosine_sim = torch.nn.functional.cosine_similarity(x_embed, machine_embed, dim=1)
 
                         score = cosine_sim.clamp(min=0.0)
 
@@ -152,6 +159,8 @@ def train_with_config(config):
                 labels = torch.cat(labels).detach().cpu().numpy()
                 domain2scores[domain] = scores
                 domain2labels[domain] = labels
+            machine2domain2scores[machine] = domain2scores
+            machine2domain2labels[machine] = domain2labels
 
             # print(scores)
             # print(labels)
@@ -159,20 +168,30 @@ def train_with_config(config):
             test_auc_source = compute_auc(domain2labels['source'], domain2scores['source'])
             test_auc_target = compute_auc(domain2labels['target'], domain2scores['target'])
             test_auc = (test_auc_source + test_auc_target) / 2
-            scheduler.step(test_auc)
+            test_auc_s.append(test_auc)
+            test_source_auc_s.append(test_auc_source)
+            test_target_auc_s.append(test_auc_target)
 
-            print(f"→ Epoch {epoch + 1} | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_auc_source:.6f},{test_auc_target:.6f} = {test_auc:.6f}")
+            print(f"→ Epoch {epoch + 1} | [{machine}] | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_auc_source:.6f},{test_auc_target:.6f} = {test_auc:.6f}")
 
             writer.add_scalar(f'{machine}/train/all/cosim', train_cosim_mean, epoch)
             writer.add_scalar(f'{machine}/test/source/auc', test_auc_source, epoch)
             writer.add_scalar(f'{machine}/test/target/auc', test_auc_target, epoch)
             writer.add_scalar(f'{machine}/test/all/auc', test_auc, epoch)
 
-            # --- Save the best model ---
-            if not np.isnan(test_auc) and test_auc > best_auc:
-                best_auc = test_auc
-                patience_counter = 0
+        test_auc = np.mean(test_auc_s)
+        test_source_auc = np.mean(test_source_auc_s)
+        test_target_auc = np.mean(test_target_auc_s)
 
+        print(f"→ Epoch {epoch + 1} | [all] | Train cosim mean = {train_cosim_mean:.6f} | Test (source,target) AUC = {test_source_auc:.6f},{test_target_auc:.6f} = {test_auc:.6f}")
+
+        scheduler.step(test_auc)
+        # --- Save the best model ---
+        if not np.isnan(test_auc) and test_auc > best_auc:
+            best_auc = test_auc
+            patience_counter = 0
+
+            for machine in machines:
                 model_save_path = os.path.join(save_dir, f"EmbeddingModel.{machine}.pth")
                 torch.save(model_embed.state_dict(), model_save_path)
                 print(f"✅ Saved model: {model_save_path}")
@@ -181,8 +200,8 @@ def train_with_config(config):
 
                 eval_infos = []
                 for domain in ['source', 'target']:
-                    scores = domain2scores[domain]
-                    labels = domain2labels[domain]
+                    scores = machine2domain2scores[machine][domain]
+                    labels = machine2domain2labels[machine][domain]
 
                     eval_info = {}
                     eval_info['domain'] = domain
@@ -194,11 +213,11 @@ def train_with_config(config):
                 save_jsonl(eval_infos, eval_csv_path)
 
                 print(f"✅ Saved eval metrics: {eval_csv_path}")
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print(f"🔴 Early stopping at epoch {epoch + 1}")
-                    break
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"🔴 Early stopping at epoch {epoch + 1}")
+                break
 
     writer.close()
     # --- Final merging ---

@@ -6,15 +6,15 @@ from tqdm import tqdm
 from transformers import Wav2Vec2Model
 
 from a_prepare_data.a_prep_path import P_devtrain, P_devtest
-from a_prepare_data.b_prep_dataset import WavDataset
+from a_prepare_data.b0_prep_dataset import WavDataset
 
 # --- Device setting ---
 device_gpu = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class MelSpecDataset(Dataset):
-    def __init__(self, part, machine,domain='all'):
-        self.wavdataset = WavDataset(part, machine,domain=domain)
+    def __init__(self, part, machine, domain='all'):
+        self.wavdataset = WavDataset(part, machine, domain=domain)
 
         # Internal config (not exposed)
         self._sample_rate = 16000
@@ -57,8 +57,8 @@ class MelSpecDataset(Dataset):
 
         label = self.wavdataset.get_label(idx)
         att = self.wavdataset.get_att(idx)
-
-        return x_TxF, label, att
+        machine = self.wavdataset.get_machine(idx)
+        return x_TxF, label, att, machine
 
 
 if __name__ == '__main__':
@@ -74,7 +74,6 @@ if __name__ == '__main__':
             print(f"Building cache for part: {part}, machine: {machine}, total: {len(dataset)} samples")
 
             for batch in tqdm(dataloader):
-                x_TxF, y_B, att = batch
+                x_TxF, y_B, att, machine_B = batch
                 # print(x_TxF.shape)
                 # break
-
