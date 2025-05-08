@@ -165,6 +165,6 @@ if __name__ == '__main__':
             print()
             break
 
-    # print(machine2attinfos)
-    #
-    # save_json(machine2attinfos, preset.dpath_machine2attinfos)
+    print(machine2attinfos)
+
+    save_json(machine2attinfos, preset.dpath_machine2attinfos)
