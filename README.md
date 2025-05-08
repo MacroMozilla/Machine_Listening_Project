@@ -1,9 +1,19 @@
+# First-Shot Unsupervised Anomalous Sound Detection
+## Machine Listening Project 
+
+Team members:
+| Name | NetID | 
+|----------|----------|
+| Hongyi Zeng | hz3866 |
+| Chancellor Rickey | cr3843 |
+| Swapnil Sharma | ss19753 |
+
 ### step 0
 pip install -r req.txt
 
 ---
 ### Step 1
-set your path in config.json
+set your path where you have your data downloaded and unzipped in config.json
 
 ---
 ### Step 2
@@ -19,9 +29,9 @@ run a_prepare_data/b0_prep_dataset.py to initialize the attributes cache
 
 The datasets are prepared using the following scripts:
 
-* `b0_prep_dataset.py`: Base dataset preparation script.
-* `b1_prep_dataset_MelSpec.py`: Dataset preparation using Mel-spectrogram features.
-* `b2_prep_dataset_wav2vec.py`: Dataset preparation using Wav2Vec embeddings.
+* `b0_prep_dataset.py`: Base dataset preparation script for raw waveform feature generation
+* `b1_prep_dataset_MelSpec.py`: Dataset preparation using Mel-spectrogram features
+* `b2_prep_dataset_wav2vec.py`: Dataset preparation using Wav2Vec embeddings
 
 Each script handles data preprocessing tailored to the corresponding feature extraction method.
 
